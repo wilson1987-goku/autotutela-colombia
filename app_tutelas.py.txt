@@ -1,0 +1,136 @@
+import streamlit as st
+from datetime import datetime, timedelta
+import pandas as pd
+from docx import Document
+import os
+from dotenv import load_dotenv
+from groq import Groq
+
+load_dotenv()
+
+# Configuración de la página
+st.set_page_config(page_title="AutoTutela Colombia ⚖️", layout="wide")
+st.title("🛡️ AutoTutela - Automatizador Inteligente de Tutelas")
+st.markdown("**Herramienta auxiliar para contestaciones de tutela en Colombia** - Revisión humana obligatoria")
+
+# Inicializar Groq
+@st.cache_resource
+def get_groq_client():
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key or api_key == "tu_clave_aquí":
+        st.sidebar.error("⚠️ Falta la API Key de Groq")
+        return None
+    return Groq(api_key=api_key)
+
+client = get_groq_client()
+
+# Sidebar
+st.sidebar.header("Menú Principal")
+pagina = st.sidebar.selectbox("Ir a", 
+    ["Generador Inteligente", "Seguimiento de Tutelas", "Plantillas por Materia"])
+
+# ===================== GENERADOR INTELIGENTE =====================
+if pagina == "Generador Inteligente":
+    st.header("🚀 Generador Inteligente de Contestación")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        ciudad = st.selectbox("Ciudad", ["Bogotá D.C.", "Medellín", "Cali", "Barranquilla", "Bucaramanga", "Otra"])
+        despacho = st.text_input("Despacho Judicial (ej: Juzgado 1 Civil Municipal)")
+        radicado = st.text_input("Radicado de la Tutela")
+        accionante = st.text_input("Nombre del Accionante")
+    
+    with col2:
+        entidad = st.text_input("Entidad Accionada", value="Entidad Pública")
+        responsable = st.text_input("Nombre del Responsable")
+        cedula = st.text_input("Cédula del Responsable")
+        cargo = st.text_input("Cargo", value="Jefe Oficina Jurídica")
+    
+    materia = st.selectbox("Materia principal", 
+        ["Derecho a la Salud", "Pensión", "Educación", "Derecho de Petición", "Debido Proceso", "Otra"])
+    
+    texto_tutela = st.text_area("Pega aquí el texto de la tutela (o resumen)", height=180)
+    hechos = st.text_area("Hechos adicionales o correcciones de la entidad", height=120)
+    
+    if st.button("✨ Generar Contestación con IA", type="primary"):
+        if not client:
+            st.error("Por favor configura tu API Key de Groq en el archivo .env")
+        else:
+            with st.spinner("Generando argumentos jurídicos con IA..."):
+                prompt = f"""Eres un abogado experto en derecho constitucional colombiano.
+                
+Tutela recibida:
+{texto_tutela}
+
+Hechos adicionales reportados por la entidad:
+{hechos}
+
+Materia: {materia}
+
+Genera una contestación profesional estructurada con:
+1. Resumen de hechos
+2. Improcedencia (si aplica)
+3. Argumentos de fondo
+4. Normativa y jurisprudencia relevante"""
+
+                try:
+                    response = client.chat.completions.create(
+                        messages=[{"role": "user", "content": prompt}],
+                        model="llama-3.3-70b-versatile",
+                        temperature=0.3,
+                        max_tokens=1800
+                    )
+                    ia_content = response.choices[0].message.content
+                except:
+                    ia_content = "Error al conectar con IA. Por favor revisa tu API Key."
+                
+                fecha = datetime.now().strftime("%d de %B de %Y")
+                
+                contestacion = f"""
+{ciudad}, {fecha}
+
+Señores
+{despacho}
+{ciudad}
+
+E.S.D.
+
+Referencia: Acción de Tutela No. {radicado}
+Accionante: {accionante}
+Accionada: {entidad}
+
+Asunto: CONTESTACIÓN ACCIÓN DE TUTELA
+
+{responsable}, identificado con c.c. No. {cedula}, en calidad de {cargo}, ante usted con respeto me permito contestar la acción de tutela de la referencia:
+
+**I. HECHOS**
+{hechos if hechos else 'Ver tutela adjunta.'}
+
+**II. FUNDAMENTOS DE DERECHO**
+
+{ia_content}
+
+**III. PETICIÓN**
+Solicito al Despacho declarar **IMPROCEDENTE** la acción de tutela, o en subsidio, **NEGAR** las pretensiones del accionante.
+
+Atentamente,
+
+{responsable}
+{cargo}
+{entidad}
+"""
+
+                st.success("✅ ¡Contestación generada exitosamente!")
+                st.text_area("Documento generado", contestacion, height=500)
+                
+                # Descargar Word
+                doc = Document()
+                doc.add_paragraph(contestacion)
+                nombre = f"Contestacion_Tutela_{radicado.replace('/', '-')}.docx"
+                doc.save(nombre)
+                
+                with open(nombre, "rb") as f:
+                    st.download_button("📥 Descargar como Word", f, file_name=nombre)
+
+st.sidebar.info("⚠️ Recuerda: Esta es una herramienta de apoyo. Siempre revisa el documento final.")
